@@ -10,6 +10,45 @@ The day is one Earth Observation question the agent cannot answer yet. You build
 
 The programme, the worked example, delivery, and how to open that pull request are in [`START_HERE.ipynb`](START_HERE.ipynb). This page is the map of the repository.
 
+## Our submission: wildfire emissions and smoke
+
+EFFIS tells the agent **where** a wildfire burned, **how big** it was and **when**. It cannot say what the fire released into the atmosphere. Our `fire-emissions` MCP server closes that gap: it takes the fire returned by EFFIS (`bbox`, `area_ha`, `firedate`) and adds what burned, the gases it released and whether the smoke shows in air-quality data. No account or API key is needed.
+
+| Tool | Answers | Data source |
+|---|---|---|
+| `get_burn_fuel_types` | What burned (forest, shrub, grass, crops), from the land-cover map **before** the fire | [ESA WorldCover](https://planetarycomputer.microsoft.com/dataset/esa-worldcover) 2020/2021, Microsoft Planetary Computer statistics API |
+| `estimate_fire_emissions` | Tonnes of CO₂, CO, CH₄, N₂O and PM2.5 (low, central, high), CO₂-equivalent and car-years | [IPCC 2006 Guidelines](https://www.ipcc-nggip.iges.or.jp/public/2006gl/vol4.html), Vol. 4, Eq. 2.27; emission factors from [Andreae and Merlet (2001)](https://doi.org/10.1029/2000GB001382) |
+| `get_smoke_signal` | CO, PM2.5 and PM10 during the fire against the two weeks before | [CAMS](https://atmosphere.copernicus.eu/) via the [Open-Meteo Air Quality API](https://open-meteo.com/en/docs/air-quality-api) |
+| `detect_burned_area` | Burned area anywhere in the world, used when EFFIS has no record | [NASA MODIS Burned Area MCD64A1](https://planetarycomputer.microsoft.com/dataset/modis-64A1-061), Microsoft Planetary Computer |
+
+The agent chains them after the registry's EFFIS server: `geocode_place` → `get_effis_burnt_areas` (or `detect_burned_area`) → `get_burn_fuel_types` → `estimate_fire_emissions` → `get_smoke_signal`. Land-cover classes are counted on Planetary Computer's servers, so no raster is downloaded.
+
+**Result for the August 2021 north Evia fire** (EFFIS: 51,881 ha, started 3 August):
+
+| | Low | Central | High |
+|---|---|---|---|
+| CO₂ (t) | 1,090,000 | 2,180,000 | 3,640,000 |
+| CO (t) | 73,000 | 146,000 | 244,000 |
+| CH₄ (t) | 3,190 | 6,370 | 10,600 |
+| N₂O (t) | 178 | 356 | 594 |
+| PM2.5 (t) | 8,770 | 17,500 | 29,300 |
+| CO₂-equivalent (t, CO₂ + CH₄ + N₂O) | 1,220,000 | 2,450,000 | 4,080,000 |
+
+Fuel: 85% tree cover (WorldCover 2020). Smoke: carbon monoxide peaked at 12.3 times its two-week baseline on 6 August 2021, PM2.5 at 7.5 times. MODIS gives 50,800 ha for the same fire, against EFFIS's 51,881 ha.
+
+**Before and after.** With only the registry's EFFIS server, the agent finds the fire and then answers that it cannot compute the emissions (`compute_metrics` needs CDSE credentials and measures burn severity, not gases). With our server added, the same question returns the table above with its sources.
+
+**Where it is.** In `START_HERE_FINAL.ipynb`, section 5 "Your turn": Cell A defines the server, Cell B calls each tool directly (no EVE tokens), Cell C is the agent with EFFIS and our server (after), Cell D the same question with EFFIS only (before). The same code is a standalone registry-ready server in [`examples/fire-emissions-server/`](examples/fire-emissions-server/) (`server.py`, `requirements.txt`, `test.py`); it passes the registry's `scripts/validate_pr.py`. `test.ipynb` walks through how MCP works, from a plain Python function to the model choosing the tools.
+
+```bash
+cd examples/fire-emissions-server
+python test.py --steps-only   # call the four tools on the Evia fire, no EVE key needed
+python test.py                # then ask the EVE model, which picks the tools itself (needs EVE_API_KEY)
+python server.py              # serve the tools over HTTP at http://localhost:8000/mcp
+```
+
+**Limits.** Emissions are an order-of-magnitude estimate (about ±50%); fuel burned per hectare is the largest uncertainty, which is why every value is a range. Fuel shares describe the fire's bounding box, not only the burnt pixels. CAMS values are model concentrations on an 11 to 40 km grid: they show the smoke, they do not measure emissions. MODIS misses fires under about 25 ha and is published one to two months after the month ends. Vegetation CO₂ can be partly re-absorbed as the land regrows. Check the model's prose against the tool output: in one run it converted 12.3 times into a wrong percentage, which a prompt rule now prevents.
+
 ## Our submission: fire exposure, weather and community air quality
 
 Download [`agentic-eo-submission.zip`](agentic-eo-submission.zip) for upload. It includes `START_HERE_FINAL.ipynb`, Sameer’s original workflow followed by our added section, plus code and the real demo snapshot. The original notebooks are preserved. The combined notebook has not yet been run on SageMaker; Sameer’s original flow was tested there, and our additions were tested locally.
@@ -26,9 +65,13 @@ Checks: `uv run python servers/effis/test.py --unit-tests` (offline), `--weather
 
 ```
 .
-├── START_HERE.ipynb          # the lab: example, your turn, pull request, use cases
+├── START_HERE_FINAL.ipynb    # our combined submission: fire emissions, then exposure and air quality
+├── START_HERE_SAMEER.ipynb   # the fire-emissions part on its own
+├── test.ipynb                # how the fire-emissions MCP server works, step by step
 ├── MCP-Handbook.ipynb        # longer background on MCP and the agent loop
 ├── examples/geocode-server/  # the Nominatim example as a standalone server.py
+├── examples/fire-emissions-server/  # our fire-emissions MCP server, ready for the registry
+├── servers/effis/            # the extended EFFIS server (exposure, weather, community air quality)
 ├── lib/agentic_eo/           # notebook helpers: EVE client, MCP clients, agent, traces
 ├── images/                   # figures used in the notebook
 ├── requirements.txt          # packages for the lab kernel

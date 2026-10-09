@@ -54,9 +54,10 @@ SYSTEM_PROMPT = (
     "If get_effis_burnt_areas returns no fires (for example outside Europe), call detect_burned_area "
     "with a bbox around the place (geocode_place with buffer_km=50) and the month (YYYY-MM), "
     "then use its burned_area_ha, bbox and first_burn_date in the next steps.\n"
-    "2. Call get_burn_fuel_types with that fire's bbox.\n"
+    "2. Call get_burn_fuel_types with that fire's bbox and firedate (it picks the land-cover map from before the fire).\n"
     "3. Call estimate_fire_emissions with the fire's area_ha, its bbox, and fuel_shares_pct from step 2.\n"
     "4. Call get_smoke_signal with the fire's bbox and firedate.\n"
+    "Do not call compute_metrics: it needs CDSE credentials that are not configured here. "
     "Report every emission as a central value with its low-high range, add the CO2-equivalent and car-years, "
     "and end with the caveats the tools return."
 )
@@ -117,7 +118,7 @@ async def run_steps(session: ClientSession) -> None:
     print(f"   MODIS {detected['burned_area_ha']:,.0f} ha vs EFFIS {EVIA_AREA_HA:,} ha")
 
     # Step 1: what burned?
-    fuel = await call(session, "get_burn_fuel_types", {"bbox": EVIA_BBOX})
+    fuel = await call(session, "get_burn_fuel_types", {"bbox": EVIA_BBOX, "fire_date": EVIA_DATE})
     show("Step 1: get_burn_fuel_types", fuel)
 
     # Step 2: how much gas? Uses the fuel shares from step 1.
@@ -173,6 +174,8 @@ async def run_agent(fire_session: ClientSession, stack: AsyncExitStack, question
     tools = []
     for session in (fire_session, effis_session):
         for tool in (await session.list_tools()).tools:
+            if tool.name == "compute_metrics":   # needs CDSE credentials we do not have
+                continue
             route[tool.name] = session
             tools.append({"type": "function", "function": {
                 "name": tool.name, "description": tool.description or "", "parameters": tool.inputSchema,
@@ -183,11 +186,17 @@ async def run_agent(fire_session: ClientSession, stack: AsyncExitStack, question
     messages = [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": question}]
     async with httpx.AsyncClient(timeout=300) as http:
         for _ in range(max_steps):
-            resp = await http.post(
-                f"{api}/v1/chat/completions",
-                headers={"Authorization": f"Bearer {key}"},
-                json={"model": model, "messages": messages, "tools": tools, "temperature": 0.1, "max_tokens": 2048},
-            )
+            for attempt in range(6):  # EVE is shared: wait and retry when it is busy (HTTP 429)
+                resp = await http.post(
+                    f"{api}/v1/chat/completions",
+                    headers={"Authorization": f"Bearer {key}"},
+                    json={"model": model, "messages": messages, "tools": tools, "temperature": 0.1,
+                          "max_tokens": 2048},
+                )
+                if resp.status_code != 429:
+                    break
+                print(f"(EVE is busy, HTTP 429: waiting {15 * (attempt + 1)} s)")
+                await asyncio.sleep(15 * (attempt + 1))
             resp.raise_for_status()
             message = resp.json()["choices"][0]["message"]
             messages.append(message)

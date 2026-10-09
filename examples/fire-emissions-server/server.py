@@ -6,7 +6,6 @@ import argparse
 import json
 import logging
 import math
-import os
 import sys
 from datetime import date, timedelta
 from typing import Any
@@ -80,7 +79,7 @@ def _parse_bbox(bbox: str) -> tuple[float, float, float, float]:
     try:
         west, south, east, north = (float(v) for v in bbox.split(","))
     except (AttributeError, ValueError):
-        raise ValueError(f"bbox must be 'west,south,east,north' in degrees, got {bbox!r}.")
+        raise ValueError(f"bbox must be 'west,south,east,north' in degrees, got {bbox!r}.") from None
     if not (-180 <= west < east <= 180 and -90 <= south < north <= 90):
         raise ValueError(f"bbox {bbox!r} is not a valid west,south,east,north box.")
     return west, south, east, north
@@ -91,7 +90,7 @@ def _parse_date(value: str) -> date:
     try:
         return date.fromisoformat(str(value).strip()[:10])
     except ValueError:
-        raise ValueError(f"date must start with YYYY-MM-DD, got {value!r}.")
+        raise ValueError(f"date must start with YYYY-MM-DD, got {value!r}.") from None
 
 
 def _box_area_ha(west: float, south: float, east: float, north: float) -> float:
@@ -155,7 +154,7 @@ async def _landcover_hectares(west: float, south: float, east: float, north: flo
             if not total:
                 continue
             piece_ha = _box_area_ha(pw, ps, pe, pn) * stats.get("valid_percent", 100.0) / 100.0
-            for count, code in zip(counts, values):
+            for count, code in zip(counts, values, strict=True):
                 name = WORLDCOVER_CLASSES.get(int(code), f"class_{int(code)}")
                 hectares[name] = hectares.get(name, 0.0) + piece_ha * count / total
     return hectares
@@ -176,13 +175,12 @@ def _parse_month(value: str) -> tuple[date, date]:
     try:
         first = date.fromisoformat(str(value).strip()[:7] + "-01")
     except ValueError:
-        raise ValueError(f"month must be YYYY-MM, got {value!r}.")
+        raise ValueError(f"month must be YYYY-MM, got {value!r}.") from None
     next_month = (first.replace(day=28) + timedelta(days=4)).replace(day=1)
     return first, next_month - timedelta(days=1)
 
 
-_PORT = int(os.getenv("MCP_PORT", "8000"))
-mcp = FastMCP("fire-emissions", host="0.0.0.0", port=_PORT, stateless_http=True)
+mcp = FastMCP("fire-emissions", host="0.0.0.0", port=8000, stateless_http=True)
 
 
 @mcp.tool()
@@ -239,6 +237,7 @@ async def detect_burned_area(bbox: str, month: str) -> str:
                 )
             # Send the whole box to every tile: pixels outside a tile are masked, so each pixel is counted
             # once, and the same box and max_size give every tile the same pixel size.
+            skipped = []
             for item in items:
                 resp = await client.post(
                     PC_ITEM_STATS,
@@ -246,10 +245,15 @@ async def detect_burned_area(bbox: str, month: str) -> str:
                             "categorical": "true", "max_size": 1024},
                     json=box,
                 )
+                # MODIS tiles are curved (sinusoidal): a tile can be listed by the search although its data
+                # does not reach the box, and the statistics call then fails. Skip it and keep the others.
+                if resp.status_code >= 500:
+                    skipped.append(item["id"])
+                    continue
                 resp.raise_for_status()
                 stats = next(iter(resp.json()["properties"]["statistics"].values()))
                 counts, values = stats["histogram"]
-                for count, value in zip(counts, values):
+                for count, value in zip(counts, values, strict=True):
                     valid += count
                     if value > 0:
                         day_counts[int(value)] = day_counts.get(int(value), 0.0) + count
@@ -257,7 +261,8 @@ async def detect_burned_area(bbox: str, month: str) -> str:
         return _tool_error(f"MODIS burned-area request failed: {exc}", bbox=bbox)
 
     if not valid:
-        return _tool_error("MODIS has no valid pixels in this bbox for that month.", bbox=bbox)
+        return _tool_error("MODIS has no valid pixels in this bbox for that month.", bbox=bbox,
+                           tiles_failed=skipped)
 
     burned_fraction = sum(day_counts.values()) / valid
     result: dict[str, Any] = {
@@ -268,6 +273,8 @@ async def detect_burned_area(bbox: str, month: str) -> str:
         "source": "NASA MODIS Burned Area MCD64A1 v061 (500 m), Microsoft Planetary Computer",
         "note": "Approximate: 500 m pixels, all fires in the box together, fires under about 25 ha missed.",
     }
+    if skipped:
+        result["tiles_skipped"] = skipped
     if day_counts:
         def to_date(day_of_year: int) -> str:
             return (date(first_day.year, 1, 1) + timedelta(days=day_of_year - 1)).isoformat()
@@ -424,6 +431,7 @@ async def estimate_fire_emissions(
         "fuel_shares_pct_used": {k: round(100 * v / total_pct, 1) for k, v in shares.items()},
         "emissions_tonnes": {g: rng(v) for g, v in tonnes.items()},
         "co2_equivalent_tonnes": rng(co2e),
+        "co2_equivalent_includes": ["CO2", "CH4", "N2O"],
         "car_years_equivalent": rng([v / CAR_T_CO2_PER_YEAR for v in tonnes["CO2"]]),
         "by_fuel_type": by_fuel,
         "method": "IPCC 2006 Vol. 4 Eq. 2.27: area x fuel burned (Table 2.4 ranges) x emission factor (Table 2.5).",
@@ -450,6 +458,8 @@ async def get_smoke_signal(bbox: str, fire_date: str, days_after: int = 10, base
         bbox: Bounding box "west,south,east,north" of the fire (e.g. from get_effis_burnt_areas).
         fire_date: Fire start date, "YYYY-MM-DD" (an EFFIS "firedate" also works).
         days_after: Days after the start date to treat as the fire period (default 10).
+                    Keep the default unless the fire is known to have burned longer; a long
+                    window lowers the fire-period mean (the peak is not affected). Max 30.
         baseline_days: Days before the start date used as the normal level (default 14).
 
     Returns:
@@ -485,8 +495,8 @@ async def get_smoke_signal(bbox: str, fire_date: str, days_after: int = 10, base
     split = start.isoformat()
     result = {}
     for p in pollutants:
-        before = [v for t, v in zip(times, hourly[p]) if t < split and v is not None]
-        during = [(v, t) for t, v in zip(times, hourly[p]) if t >= split and v is not None]
+        before = [v for t, v in zip(times, hourly[p], strict=False) if t < split and v is not None]
+        during = [(v, t) for t, v in zip(times, hourly[p], strict=False) if t >= split and v is not None]
         if not before or not during:
             result[p] = {"error": "no data for this period"}
             continue
@@ -519,7 +529,7 @@ if __name__ == "__main__":
         default="http",
         help="http for streamable-http on 0.0.0.0:8000/mcp (default); stdio for local MCP clients",
     )
-    parser.add_argument("--port", type=int, default=_PORT, help="HTTP port (default from MCP_PORT or 8000)")
+    parser.add_argument("--port", type=int, default=8000, help="HTTP port (default 8000)")
     args = parser.parse_args()
     mcp.settings.port = args.port
     if args.transport == "stdio":
