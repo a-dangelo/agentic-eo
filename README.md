@@ -95,10 +95,6 @@ uv run jupyter lab
 
 What we review is the notebook on your SageMaker instance. If you change the notebook or the server code on your laptop, upload those files back into the lab before the end of the day.
 
-## Funding
-
-This project is supported by the European Space Agency (ESA) Φ-lab through the Large Language Model for Earth Observation and Earth Science project, as part of the Foresight Element within FutureEO Block 4 programme.
-
 ## Citation
 
 ```bibtex
