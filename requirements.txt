@@ -1,0 +1,33 @@
+# Python packages for the "Agentic EO (Python 3.12)" kernel.
+# Installed by the lab setup with: uv pip install -r requirements.txt
+
+# MCP: build and call tool servers. mcp stays on 1.x because the registry's servers
+# import mcp.server.fastmcp, which 2.x removed.
+mcp[cli]>=1.20.0,<2.0.0
+fastmcp>=2.12.0
+httpx>=0.27.0
+python-dotenv>=1.0.0
+
+# Agents and the EVE model (OpenAI-compatible gateway)
+# langchain provides create_agent; langchain-core alone does not.
+langgraph>=0.6.0
+langchain>=1.2.0
+langchain-openai>=0.3.0
+langchain-mcp-adapters>=0.1.9
+
+# Earth Observation
+pystac-client>=0.8.0
+odc-stac>=0.3.10
+rioxarray>=0.17.0
+geopandas>=1.0.0
+openeo>=0.40.0
+geopy>=2.4.0
+
+# Maps, plots, notebooks
+matplotlib>=3.9.0
+ipykernel>=6.29.0
+nbclient>=0.10.0
+
+# Quality checks used by `make check`
+ruff>=0.6.0
+jupyter==1.1.1
