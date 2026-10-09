@@ -32,7 +32,7 @@ No code? Ask the help desk for a spare account.
 You can also download this folder and work on your laptop, so you can use a coding assistant (Cursor, or another). The EVE API key still comes from the lab: copy `EVE_API_KEY` out of the lab `.env` into the `.env` on your machine. On a fresh clone:
 
 ```bash
-git clone https://github.com/eve-esa/agentic-eo-hackathon && cd agentic-eo-hackathon
+git clone https://github.com/a-dangelo/agentic-eo && cd agentic-eo
 uv venv -p 3.12 && uv pip install -r requirements.txt jupyterlab
 cp .env.example .env   # paste EVE_API_KEY from the lab
 uv run jupyter lab
