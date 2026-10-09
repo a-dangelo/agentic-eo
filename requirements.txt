@@ -31,3 +31,6 @@ nbclient>=0.10.0
 # Quality checks used by `make check`
 ruff>=0.6.0
 jupyter==1.1.1
+
+# Our EFFIS extension (included here so the notebook needs no sibling checkout).
+-r servers/effis/requirements.txt

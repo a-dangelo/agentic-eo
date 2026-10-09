@@ -1,0 +1,14 @@
+# Fire Detection MCP Server — Dependencies
+# mcp is pinned: 2.x dropped the vendored mcp.server.fastmcp module (FastMCP was
+# renamed MCPServer). server.py imports it, so an unpinned mcp breaks the build.
+mcp[cli]==1.27.0
+httpx>=0.27.0
+pyshp>=2.3.0     # For reading local EFFIS shapefile cache
+python-dotenv>=1.0.0
+matplotlib>=3.8.0  # For compute_metrics time-series plots
+numpy>=1.24.0      # For local stats computation from ORBIT TIFFs
+tifffile>=2023.7.0 # Lightweight multi-band TIFF reader (depends on numpy)
+pyproj>=3.6.0      # WGS84 geodesic bbox expansion (Geod) and UTM Process API grid
+pandas>=2.2.0      # VRR recovery table (Lin et al. 2005)
+pillow>=10.0.0     # composite, burn-mask, and severity previews
+shapely>=2.0.0     # Clip OSM assets to the EFFIS perimeter

@@ -10,6 +10,18 @@ The day is one Earth Observation question the agent cannot answer yet. You build
 
 The programme, the worked example, delivery, and how to open that pull request are in [`START_HERE.ipynb`](START_HERE.ipynb). This page is the map of the repository.
 
+## Our submission: fire exposure, weather and community air quality
+
+Download [`agentic-eo-submission.zip`](agentic-eo-submission.zip) for upload. It includes `START_HERE_FINAL.ipynb`, Sameer’s original workflow followed by our added section, plus code and the real demo snapshot. The original notebooks are preserved. The combined notebook has not yet been run on SageMaker; Sameer’s original flow was tested there, and our additions were tested locally.
+
+In `START_HERE_FINAL.ipynb`, run the setup cell, then **Which places and assets overlap this fire?** It selects an EFFIS perimeter, maps OSM building/road exposure and named place points, plots historical weather, compares modeled PM₂.₅/CO at Agia Anna with the preceding week, and asks EVE for a briefing. The trace checks that all three new tools succeeded.
+
+The extended server is included in `servers/effis/`; no sibling checkout is needed. `get_fire_exposure` uses a timestamped OSM snapshot; `get_fire_weather` uses Open-Meteo ERA5; `get_community_air_quality` compares CAMS Europe concentrations against a seven-day baseline and reports coarse wind alignment. These describe mapped exposure and modeled conditions, not damage, population impacts or proof that this fire caused pollution. EVE's model calls our local server; the hosted registry has not been updated.
+
+Extract the upload ZIP into one folder on the lab machine and follow `UPLOAD.txt`. Keep `lib/`, `servers/`, `scratch/` and `requirements.txt` beside the final notebook. Install dependencies in the notebook kernel’s environment. Keep the lab's own `.env`; do not upload or share yours. Each teammate needs their own EVE key. Check EVE’s prose against the result tables: generated summaries can misstate ratios.
+
+Checks: `uv run python servers/effis/test.py --unit-tests` (offline), `--weather-only` (live weather) or `--air-quality-only` (live modeled pollution) with the same test script. The notebook itself runs the real exposure and EVE checks. `test.ipynb` is the separate teammate experiment and is not needed for this demo.
+
 ## What's inside
 
 ```
